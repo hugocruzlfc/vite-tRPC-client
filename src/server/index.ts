@@ -1,67 +1,49 @@
+import { logRequest, logStartup, logTRPCCall } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { initTRPC } from "@trpc/server";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
-import { z } from "zod";
 
 const t = initTRPC.create();
 
-const publicProcedure = t.procedure;
+// Middleware de logging
+const loggingMiddleware = t.middleware(async ({ path, type, next, input }) => {
+  const start = Date.now();
+
+  try {
+    const result = await next();
+    const duration = Date.now() - start;
+
+    logTRPCCall(
+      type,
+      path,
+      duration,
+      result.ok,
+      input,
+      result.ok ? undefined : result.error?.message,
+    );
+
+    return result;
+  } catch (error) {
+    const duration = Date.now() - start;
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+
+    logTRPCCall(type, path, duration, false, input, errorMessage);
+    throw error;
+  }
+});
+
+const publicProcedure = t.procedure.use(loggingMiddleware);
 const router = t.router;
 
 const appRouter = router({
-  // Procedimientos para Users
-  users: router({
-    // Listar todos los usuarios
-    list: publicProcedure.query(async () => {
-      return await prisma.user.findMany({
-        include: {
-          posts: true,
-        },
-      });
-    }),
-
-    // Crear un nuevo usuario
-    create: publicProcedure
-      .input(
-        z.object({
-          email: z.email(),
-          name: z.string(),
-        }),
-      )
-      .mutation(async ({ input }) => {
-        return await prisma.user.create({
-          data: input,
-        });
-      }),
-  }),
-
-  // Procedimientos para Posts
-  posts: router({
-    // Listar todos los posts
-    list: publicProcedure.query(async () => {
-      return await prisma.post.findMany({
-        include: {
-          author: true,
-        },
-      });
-    }),
-
-    // Crear un nuevo post
-    create: publicProcedure
-      .input(
-        z.object({
-          title: z.string(),
-          content: z.string().optional(),
-          published: z.boolean().default(false),
-          authorId: z.number(),
-        }),
-      )
-      .mutation(async ({ input }) => {
-        return await prisma.post.create({
-          data: input,
-        });
-      }),
+  users_list: publicProcedure.query(async () => {
+    return await prisma.user.findMany({
+      include: {
+        posts: true,
+      },
+    });
   }),
 });
 
@@ -70,11 +52,27 @@ const appRouter = router({
 export type AppRouter = typeof appRouter;
 
 // create server
-createHTTPServer({
+const server = createHTTPServer({
   middleware: cors(),
   router: appRouter,
-  createContext() {
-    console.log("context 3");
-    return {};
+  createContext({ req }) {
+    // Log de peticiones HTTP
+    const start = Date.now();
+    logRequest(
+      req.method || "UNKNOWN",
+      req.url || "/",
+      undefined,
+      req.headers["user-agent"],
+    );
+
+    return {
+      requestStart: start,
+    };
   },
-}).listen(2022);
+});
+
+const PORT = 2022;
+
+server.listen(PORT, () => {
+  logStartup(PORT);
+});
