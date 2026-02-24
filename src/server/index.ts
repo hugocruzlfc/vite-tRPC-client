@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/prisma";
 import { initTRPC } from "@trpc/server";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
@@ -9,23 +10,59 @@ const publicProcedure = t.procedure;
 const router = t.router;
 
 const appRouter = router({
-  greeting: publicProcedure
-    // This is the input schema of your procedure
-    // 💡 Tip: Try changing this and see type errors on the client straight away
-    .input(
-      z
-        .object({
-          name: z.string().nullish(),
-        })
-        .nullish(),
-    )
-    .query(({ input }) => {
-      // This is what you're returning to your client
-      return {
-        text: `hello ${input?.name ?? "world"}`,
-        // 💡 Tip: Try adding a new property here and see it propagate to the client straight-away
-      };
+  // Procedimientos para Users
+  users: router({
+    // Listar todos los usuarios
+    list: publicProcedure.query(async () => {
+      return await prisma.user.findMany({
+        include: {
+          posts: true,
+        },
+      });
     }),
+
+    // Crear un nuevo usuario
+    create: publicProcedure
+      .input(
+        z.object({
+          email: z.email(),
+          name: z.string(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        return await prisma.user.create({
+          data: input,
+        });
+      }),
+  }),
+
+  // Procedimientos para Posts
+  posts: router({
+    // Listar todos los posts
+    list: publicProcedure.query(async () => {
+      return await prisma.post.findMany({
+        include: {
+          author: true,
+        },
+      });
+    }),
+
+    // Crear un nuevo post
+    create: publicProcedure
+      .input(
+        z.object({
+          title: z.string(),
+          content: z.string().optional(),
+          published: z.boolean().default(false),
+          authorId: z.number(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        return await prisma.post.create({
+          data: input,
+        });
+      }),
+  }),
 });
 
 // export only the type definition of the API
